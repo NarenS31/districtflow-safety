@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-surface-page-light text-ink-primary-light dark:bg-surface-page-dark dark:text-ink-primary-dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.maplibregl-popup-content {
+  @apply bg-surface-light dark:bg-surface-dark text-ink-primary-light dark:text-ink-primary-dark rounded-lg shadow-lg;
+}

@@ -1,0 +1,229 @@
+# DistrictFlow Safety
+### NC-08 Pedestrian & Cyclist Risk-Exposure Index
+
+A Congressional App Challenge submission identifying and explaining
+pedestrian/cyclist crash-risk hotspots in North Carolina's 8th Congressional
+District — Union, Cabarrus, Stanly, Montgomery, Anson, Richmond, Mecklenburg,
+and Robeson counties.
+
+## Problem statement
+
+Pedestrian and cyclist crash risk is not uniform across NC-08. It concentrates
+on specific road segments, driven by a specific, legible mix of factors —
+speed limit, missing crosswalks, traffic volume, sidewalk gaps — and its
+consequences are made worse or better by how far a segment sits from
+emergency response. Two segments with identical crash risk are not equally
+urgent if one is five minutes from the nearest EMS station and the other is
+twenty. This project scores every road segment in the district on both axes
+at once (the **Risk-Exposure Index**, below), explains *why* each score is
+what it is in plain, auditable terms, and turns that into a ranked,
+actionable list with a suggested countermeasure per segment — not just a
+map of red dots.
+
+**Provenance rule:** every number this dashboard shows traces back to a real,
+cited public data source. Nothing synthetic is presented as real; anywhere
+a gap exists (sparse rural data, missing EMS records), it is flagged
+explicitly rather than filled in. See [Limitations](#limitations) and
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph Data["Data layer (data/pipelines/)"]
+        ISRN[NCDOT ISRN road network]
+        OSM[OpenStreetMap fallback]
+        CRASH[NCDOT StatewideCrashTable]
+        BIKEPED[NCDOT NCBikePed / HSIP incidents]
+        AADT[NCDOT AADT segment data]
+        EMS[Fire/EMS station locations]
+        TIMS[DriveNC.gov / TIMS live overlay]
+    end
+
+    subgraph Graph["Graph + feature engineering"]
+        SEG[Road segments = graph nodes<br/>shared intersections = edges]
+        FEAT[Per-segment features:<br/>AADT · speed limit · lanes<br/>crash history · rural/urban flag]
+        ROUTE[EMS shortest-path distance<br/>over intersection routing graph]
+    end
+
+    subgraph Model["RiskGNN (models/gnn/)"]
+        GNN[Spatial GNN: diffusion graph conv<br/>+ learned semantic adjacency<br/>+ missing-modality-tolerant fusion]
+        POISSON[Poisson regression head<br/>AADT as exposure offset]
+    end
+
+    subgraph Explain["Explainability (models/explainer/, models/risk/)"]
+        FEATATTR[Per-segment feature<br/>attribution explainer]
+        RISKEXP[Risk-Exposure Index<br/>risk × EMS-distance weighting]
+        DISPARITY[Rural/suburban<br/>disparity analysis]
+        COUNTERMEASURE[FHWA countermeasure<br/>rule-based lookup]
+        COUNTERFACTUAL[What-if layer:<br/>re-run GNN under intervention]
+    end
+
+    subgraph Dashboard["Dashboard (dashboard/)"]
+        MAP[Risk-Exposure heatmap]
+        TOPN[Top-N priority list]
+        DISP[Disparity panel]
+        DETAIL[Segment detail:<br/>score · attribution · countermeasure · what-if]
+    end
+
+    ISRN --> SEG
+    OSM --> SEG
+    CRASH --> FEAT
+    BIKEPED --> FEAT
+    AADT --> FEAT
+    EMS --> ROUTE
+    SEG --> GNN
+    FEAT --> GNN
+    ROUTE --> RISKEXP
+    GNN --> POISSON
+    POISSON --> FEATATTR
+    POISSON --> RISKEXP
+    FEATATTR --> COUNTERMEASURE
+    POISSON --> COUNTERFACTUAL
+    RISKEXP --> DISPARITY
+    RISKEXP --> MAP
+    RISKEXP --> TOPN
+    FEATATTR --> DETAIL
+    COUNTERMEASURE --> DETAIL
+    COUNTERFACTUAL --> DETAIL
+    DISPARITY --> DISP
+    TIMS -. current-conditions overlay only .-> MAP
+```
+
+### What's forked from XTraffic, and what isn't
+
+This project reuses architectural patterns from an earlier spatio-temporal
+GNN research project (graph construction, GNN encoder, GNNExplainer-style
+attribution) — **not its data loaders or forecasting task head**. Specifically:
+
+| Reused (adapted) | Not reused |
+|---|---|
+| `GraphConv` diffusion graph convolution | METR-LA / PEMS-BAY data loaders |
+| MOD-1 learned semantic + physical adjacency blend | The speed-forecasting task head |
+| MOD-3 `HeteroFusion` missing-modality tolerance | The multi-scale dilated **temporal** conv stack (no time series here — see `models/gnn/risk_gnn.py`) |
+| GNNExplainer-style mask-and-preserve optimization | Per-node/propagation-path attribution (we attribute per-**feature**, not per-node — see `models/explainer/explain.py`) |
+
+Every file that ports a pattern says so in its own docstring, with the
+specific thing that changed and why.
+
+## The Risk-Exposure Index (the headline metric)
+
+```
+risk_norm     = min-max(risk_score)          over all NC-08 segments, in [0,1]
+ems_norm      = min-max(ems_distance_meters)  over all NC-08 segments, in [0,1]
+risk_exposure = risk_norm * (1 + w_ems * ems_norm)
+```
+
+`risk_score` is RiskGNN's predicted ped/cyclist crash-risk rate for a segment.
+`ems_distance_meters` is the shortest road-network distance from the segment
+to its nearest fire/EMS station. `w_ems` (default `1.0`, `configs/risk_exposure.yaml`)
+is the one tunable knob: at `w_ems=1.0`, a segment at the district's maximum
+EMS distance gets up to **2×** its base risk score; a segment adjacent to a
+station is left at ~1×. The form is multiplicative, not a weighted sum,
+specifically so a segment cannot rank high without a meaningful base risk
+score — EMS distance amplifies real risk, it doesn't manufacture it from
+nothing. Full derivation and the missing-data fallback: `models/risk/risk_exposure.py`.
+
+## Data sources
+
+| Source | Used for | Link |
+|---|---|---|
+| NCDOT Integrated Statewide Road Network (ISRN) | Road graph, speed limit, lane count, functional class | NCDOT ArcGIS Online (`services.arcgis.com/NuWFvHYDMVmmxMeM`) — exact layer confirmed in `data/pipelines/DATA_SOURCES.md` |
+| OpenStreetMap (Overpass API) | Fallback for ISRN attribute gaps | `overpass-api.de` |
+| NCDOT StatewideCrashTable | General vehicle crash history (secondary feature) | NCDOT ArcGIS Online |
+| NCDOT NCBikePed / HSIP BikePed | Ped/cyclist incident history (primary label) | NCDOT ArcGIS Online |
+| NCDOT AADT | Annual average daily traffic (static feature) | NCDOT ArcGIS Online |
+| Fire/EMS station locations | EMS-distance routing feature | NC OneMap + per-county GIS where NC OneMap is incomplete — see `data/pipelines/EMS_STATIONS_TODO.md` |
+| DriveNC.gov / TIMS | Live "current conditions" overlay only, never training data | driveNC.gov |
+
+Every pipeline script in `data/pipelines/` downloads directly from these
+sources — nothing is manually copied in. Full URLs, field schemas, license
+notes, and per-source known gaps: **`data/pipelines/DATA_SOURCES.md`**.
+
+## Methodology summary
+
+1. **Graph construction**: road segments are the graph's nodes (not
+   intersections); adjacency comes from shared intersections, real ISRN/OSM
+   topology where available, geometric proximity as a documented fallback
+   (`utils/graph_utils.build_segment_adjacency`).
+2. **Feature engineering**: per-segment infrastructure, AADT, 5-year crash/
+   incident history, and EMS-access features, grouped into modalities a
+   segment can be missing without breaking inference — see `docs/FEATURES.md`.
+3. **Model**: `RiskGNN` (`models/gnn/risk_gnn.py`) is a purely spatial GNN —
+   stacked diffusion graph convolutions over a blended physical + learned
+   adjacency — trained with a Poisson regression loss against 5-year
+   ped/cyclist incident counts, using AADT as the traffic-exposure offset
+   (`models/risk/targets.py`).
+4. **Explainability**: a GNNExplainer-style learned feature mask
+   (`models/explainer/explain.py`) shows which of a segment's own input
+   features drove its score, validated against a schema contract
+   (`models/explainer/schema.py`) the rest of the pipeline depends on.
+5. **Risk-Exposure Index**: see above.
+6. **Disparity analysis**: Risk-Exposure aggregated by county and by rural vs.
+   suburban/urban classification (`models/risk/disparity.py`).
+7. **Actionable output**: a ranked Top-N list (`evaluation/priority_list.py`)
+   tagging each segment with FHWA-referenced countermeasure suggestions from
+   a transparent, editable rule table (`models/risk/countermeasure.py`) keyed
+   to the explainer's top attributed features.
+8. **Counterfactual layer**: re-runs the trained GNN with one segment's
+   features hypothetically edited (add a crosswalk, drop the speed limit),
+   showing the updated score for that segment *and its graph neighbors* via
+   real message passing (`models/risk/counterfactual.py`).
+
+## Running it
+
+```bash
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 1. Pull real data (see data/pipelines/DATA_SOURCES.md for what each does)
+python -m data.pipelines.isrn_roads
+python -m data.pipelines.crashes_general
+python -m data.pipelines.crashes_pedcyclist
+python -m data.pipelines.aadt
+python -m data.pipelines.assemble_features   # joins the above into the model's feature table
+
+# 2. Train
+python -m models.gnn.train --config configs/model.yaml
+
+# 3. Score every segment + build the priority list
+python -m models.gnn.evaluate
+python -m evaluation.priority_list --n 25
+
+# 4. Export everything the dashboard needs (static JSON/GeoJSON)
+python -m evaluation.export_dashboard_data --n-priority 25
+
+# 5. Run the dashboard
+cd dashboard && npm install && npm run dev
+```
+
+The dashboard is fully static — every number is precomputed by step 4 and
+served as JSON, including the counterfactual "what-if" results for the Top-N
+segments, so deployment (Vercel / GitHub Pages) needs no live backend.
+
+## Limitations
+
+Full detail: **[docs/LIMITATIONS.md](docs/LIMITATIONS.md)**. The two the
+brief specifically asks to state plainly:
+
+- **Rural counties have sparser ped/cyclist incident data than the
+  Charlotte-adjacent suburbs.** Mecklenburg County's crash/incident reporting
+  infrastructure is denser than Anson, Richmond, Montgomery, or Stanly's. A
+  low score in a rural county can mean "genuinely low risk" or "under-reported"
+  — the dashboard cannot always tell these apart, so segments in
+  thin-data counties are explicitly flagged low-confidence
+  (`data_density_flag`) rather than shown with false precision.
+- **AADT is an annual average, not real-time.** It is used as a single static
+  feature and as a Poisson exposure offset — never resampled or treated as a
+  time series. Real-time conditions are a different question this project
+  doesn't answer (that's what the DriveNC.gov/TIMS overlay is for, and even
+  that layer is current-conditions only, never archived as training data).
+
+## Manual TODOs (not fabricated around)
+
+- Exact EMS/fire station locations for counties without a clean centralized
+  source — see `data/pipelines/EMS_STATIONS_TODO.md`.
+- Outreach to county planning offices, Safe Routes to School coordinators, or
+  Vision Zero contacts, for real-world validation of the Top-N list.
+- The demo video's opening anecdote/intersection — a narrative choice, not a
+  data question.

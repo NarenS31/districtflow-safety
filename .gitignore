@@ -24,3 +24,8 @@ dashboard/.vite/
 .DS_Store
 .vscode/
 .claude/
+
+# Dashboard data is a generated artifact (evaluation/export_dashboard_data.py)
+# from REAL trained-model output — never commit synthetic smoke-test data as
+# if it were real. Regenerate after training on real data.
+dashboard/public/data/
