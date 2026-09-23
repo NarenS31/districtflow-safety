@@ -3,12 +3,20 @@
 Per the brief: tag each high-priority segment with a suggested countermeasure
 category based on which features drove its score, using a simple, editable,
 transparent rule table keyed to the explainer's top attributed features and
-referencing standard FHWA pedestrian safety countermeasure categories
-(FHWA's Proven Safety Countermeasures / STEP guide — see docs/README.md for
-the citation). This is a LOOKUP, not a model: every rule below is one line a
-non-engineer can read, question, and edit. If a feature name here drifts from
-what data/pipelines actually produces, RULES will simply stop matching (loud,
-via the "no rule matched" fallback) rather than silently mis-tagging.
+referencing standard FHWA pedestrian safety countermeasure categories. This
+is a LOOKUP, not a model: every rule below is one line a non-engineer can
+read, question, and edit. If a feature name here drifts from what
+data/pipelines actually produces, RULES will simply stop matching (loud, via
+the "no rule matched" fallback) rather than silently mis-tagging.
+
+CITATIONS (verified real, not assumed — checked against FHWA's own site):
+- FHWA Proven Safety Countermeasures (PSCi), 28 countermeasures including
+  Road Diets, Crosswalk Visibility Enhancements, Pedestrian Refuge Islands,
+  Lighting, Signal Timing: https://highways.dot.gov/safety/proven-safety-countermeasures
+- FHWA STEP (Safe Transportation for Every Pedestrian) guide:
+  https://highways.dot.gov/safety/pedestrian-bicyclist/step
+- FHWA Systemic Safety Project Selection Tool:
+  https://highways.dot.gov/safety/data-analysis-tools/systemic/systemic-safety-project-selection-tool
 """
 from __future__ import annotations
 
