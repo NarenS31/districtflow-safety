@@ -51,16 +51,32 @@ def build_target(segments: pd.DataFrame) -> np.ndarray:
 
 def compute_data_density_flag(segments: pd.DataFrame, min_county_incidents: int = 15
                               ) -> pd.Series:
-    """Returns a bool Series aligned to `segments.index`."""
-    own_signal = (
-        (segments["pedcyclist_incident_count_5yr"].fillna(0) > 0)
-        | (segments["general_crash_count_5yr"].fillna(0) > 0)
-        | (segments["aadt_raw"].fillna(0) > 0)
+    """Returns a bool Series aligned to `segments.index`.
+
+    REVISED (the original draft checked "does this segment have ANY AADT/
+    crash/general-crash signal at all" — on the real assembled NC-08 table,
+    AADT is present on ~100% of segments (see assemble_features.py's stats
+    report), so that check was true for nearly every row and the flag was
+    almost never set — a real bug caught by actually running this on live
+    data, not a synthetic smoke test with deliberately-injected gaps). What
+    ACTUALLY varies on the real table is (a) whether the ISRN fine-attribute
+    join reached this segment (speed_limit_mph / lane_count present — real
+    rate ~45%/~25% missing, see DIAGNOSIS comment in assemble_features.py)
+    and (b) whether an EMS routing distance was resolved. Both are checked
+    directly instead of the AADT proxy. The county-incident-count floor is
+    kept as a second, independent criterion (harmless if it never fires on
+    the current 8 counties, which all clear 15 — it exists for whichever
+    future county/time-window has a genuinely thin sample, e.g. mid-year on
+    a partial data pull).
+    """
+    missing_fine_attrs = (
+        segments["speed_limit_mph"].isna() | segments["lane_count"].isna()
     )
+    missing_ems = segments["ems_distance_m"].isna() if "ems_distance_m" in segments else False
     county_totals = segments.groupby("county")["pedcyclist_incident_count_5yr"].transform(
         lambda s: s.fillna(0).sum())
     county_sparse = county_totals < min_county_incidents
-    return (~own_signal) | county_sparse
+    return missing_fine_attrs | missing_ems | county_sparse
 
 
 def target_summary(segments: pd.DataFrame) -> Dict[str, float]:

@@ -1,0 +1,218 @@
+# DistrictFlow Safety -- data source configuration.
+#
+# Every URL below was queried LIVE and confirmed to return real, non-empty
+# records on 2026-09-22 (see data/pipelines/DATA_SOURCES.md for the full
+# provenance writeup: field schemas, license/attribution, update cadence,
+# known gaps). Nothing in this project reads from a URL that was not verified
+# this way -- that is the project's hard provenance rule.
+
+seed: 42  # used by any pipeline that samples records (none currently do full
+          # random sampling -- all pull complete filtered sets -- but the seed
+          # is pinned here so any future sampling step is reproducible)
+
+# NC's 8th Congressional District, 2026 map: 8 counties.
+counties:
+  nc08:
+    - Union
+    - Cabarrus
+    - Stanly
+    - Montgomery
+    - Anson
+    - Richmond
+    - Mecklenburg
+    - Robeson
+
+  # NCDOT's "MaintCntyCode" domain (NCDOT_RoadCharacteristicsQtr) uses NC's
+  # standard 3-digit ALPHABETICAL county code (001=Alamance ... 100=Yancey) --
+  # this is NOT the federal FIPS county code. Values below were read directly
+  # out of the live service's field domain (codedValues), not hand-typed.
+  nc08_maintcntycode:
+    Anson: "004"
+    Cabarrus: "013"
+    Mecklenburg: "060"
+    Montgomery: "062"
+    Richmond: "077"
+    Robeson: "078"
+    Stanly: "084"
+    Union: "090"
+
+  # NC1Map_Emergency_Services stores county names upper-cased with no county
+  # code field usable for a join -- filtered by exact upper-case name match.
+  nc08_upper:
+    - UNION
+    - CABARRUS
+    - STANLY
+    - MONTGOMERY
+    - ANSON
+    - RICHMOND
+    - MECKLENBURG
+    - ROBESON
+
+# Bounding box = live extent of NCDOT_RoadCharacteristicsQtr records for the 8
+# counties above (queried via returnExtentOnly=true, WGS84), padded ~0.02 deg
+# (~2 km) on every side as a safety margin for segments/points that sit right
+# on a county line. Used ONLY as a fallback filter for sources with no county
+# attribute (AADT segments) or as a secondary sanity bound for OSM.
+bbox:
+  min_lon: -81.09
+  min_lat: 34.28
+  max_lon: -78.80
+  max_lat: 35.55
+
+# "5 most recent finalized years" (per task spec) for both crash tables.
+# StatewideCrashTable's live max Year is 2026, but 2026's NC-08 record count
+# (37,675) is far below every finalized year (2021-2025 all sit at 59.9k-63.4k)
+# -- consistent with 2026 being a partial, still-accumulating year as of the
+# September 2026 pull date, so it is excluded. NCDOT_NonMotoristCrashes tops
+# out at CrashYear 2025 with zero 2026 records at all. Both tables therefore
+# agree on the same 5-year window.
+crash_years:
+  finalized_years: [2021, 2022, 2023, 2024, 2025]
+
+datasets:
+
+  isrn_roads:
+    description: >
+      NCDOT Integrated Statewide Road Network (ISRN) road-characteristics
+      extract -- the base road graph (speed limit, lane count, functional
+      classification, county) for the dashboard's exposure denominator.
+    service_url: "https://gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_RoadCharacteristicsQtr/MapServer/0"
+    county_field: "MaintCntyCode"      # filter: MaintCntyCode IN (nc08_maintcntycode values)
+    page_size: 2000
+    verify_ssl: true                   # gis11.services.ncdot.gov presents a valid cert; no -k needed
+    fields_used:
+      - RouteName
+      - StreetName
+      - MaintCntyCode
+      - RouteClass
+      - FuncClass
+      - SpeedLimit
+      - DesignSpd
+      - ThruLaneCount
+      - PeakLanes
+      - LaneWidth
+      - SrfcType
+      - UrbanType
+      - AADT
+      - AadtDate
+      - BeginMp1
+      - EndMp1
+      - RouteID
+
+  crashes_general:
+    description: >
+      NCDOT Statewide Crash Table -- all reportable motor-vehicle crashes,
+      county/year level with severity + involvement flags (incl. Ped/Bike
+      involvement, useful as a cross-check against crashes_pedcyclist).
+    service_url: "https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/StatewideCrashTable/FeatureServer/3"
+    county_field: "County"
+    year_field: "Year"
+    page_size: 2000
+    fields_used:
+      - Crash_ID
+      - Date
+      - Year
+      - Month
+      - County
+      - City
+      - CrshSeverity
+      - NumFatalities
+      - NumAInjuries
+      - NumBInjuries
+      - NumCInjuries
+      - PedFatalities
+      - PedSeriousInjuries
+      - BikeFatalities
+      - BikeSeriousInjuries
+      - CrashType
+      - SpeedRelated
+      - PedInvolved
+      - BikeInvolved
+
+  crashes_pedcyclist:
+    description: >
+      NCDOT Non-Motorist Crashes -- individual pedestrian/cyclist-involved
+      crash records with coordinates. This is the dashboard's primary
+      ped/cyclist incident source (point-level, not just county aggregates).
+    service_url: "https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_NonMotoristCrashes/FeatureServer/0"
+    county_field: "County"
+    year_field: "CrashYear"
+    page_size: 2000
+    fields_used:
+      - CrashID
+      - CrashDate
+      - CrashYear
+      - CrashSevr
+      - NM_Type       # Pedestrian / Bicyclist / Other
+      - NM_Age
+      - NM_Sex
+      - NM_Inj
+      - BikeDir
+      - SpeedLimit
+      - RdClass
+      - RdCharacte
+      - RdConditio
+      - LightCond
+      - Weather
+      - Latitude
+      - Longitude
+      - County
+      - City
+
+  aadt:
+    description: >
+      NCDOT 2025 AADT (annual average daily traffic) and Traffic Segments --
+      one static annual-average volume per road segment, the denominator for
+      exposure-normalized crash-risk scoring.
+    service_url: "https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_2025_AADTandTrafficSegments_gdb/FeatureServer/0"
+    filter_method: "bbox"   # no county attribute on this layer -- see DATA_SOURCES.md
+    page_size: 2000
+    fields_used:
+      - TSegID2025
+      - RouteID
+      - BeginMP
+      - EndMP
+      - AADT
+      - AADTT
+      - AADT_Year
+      - SU_AADT
+      - MU_AADT
+
+  tims_incidents:
+    description: >
+      NCDOT TIMS active/current traffic incidents -- a live "current
+      conditions" overlay only. NOT accumulated as historical training data
+      (TIMS does not archive; see tims_overlay.py docstring).
+    service_url: "https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_TIMS_Incidents/FeatureServer/0"
+    county_field: "CountyName"
+    page_size: 2000
+    # DriveNC.gov's own documented public REST API (equivalent live incident
+    # feed, alternate access path if the ArcGIS org endpoint above ever
+    # changes): https://www.drivenc.gov/help/endpoint/event
+    drivenc_doc_url: "https://www.drivenc.gov/help/endpoint/event"
+
+  ems_fire_stations:
+    description: >
+      Fire + EMS station point locations for the 8 counties, sourced from two
+      NC OneMap statewide layers (confirmed live coverage in ALL 8 counties --
+      see EMS_STATIONS_TODO.md).
+    fire:
+      name: "NC Fire Stations (NC Office of State Fire Marshal via NC OneMap)"
+      service_url: "https://services5.arcgis.com/yCv672AxcRF0kngG/arcgis/rest/services/NC_Fire_Stations/FeatureServer/0"
+      county_field: "COUNTY"
+      county_case: "title"     # e.g. "Union"
+    ems:
+      name: "NC1Map Emergency Medical Services stations (NC OneMap)"
+      service_url: "https://services.nconemap.gov/secure/rest/services/NC1Map_Emergency_Services/FeatureServer/0"
+      county_field: "county"
+      county_case: "upper"     # e.g. "UNION" -- see nc08_upper above
+      native_sr: 32119          # NAD83 / North Carolina (meters); we request outSR=4326 instead of trusting raw x/y
+
+  osm_fallback:
+    description: >
+      OpenStreetMap road attributes (Overpass API) -- supplemental source used
+      ONLY to fill speed-limit/lane-count gaps left by isrn_roads, never as a
+      primary source.
+    endpoint: "https://overpass-api.de/api/interpreter"
+    timeout_s: 180
+    tags_pulled: ["highway", "maxspeed", "lanes", "sidewalk", "cycleway"]

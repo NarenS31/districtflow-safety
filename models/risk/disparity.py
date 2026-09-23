@@ -64,12 +64,16 @@ def disparity_summary(segments: pd.DataFrame) -> Dict[str, pd.DataFrame]:
 
 
 def disparity_gap(summary: Dict[str, pd.DataFrame]) -> Dict[str, float]:
-    """The single headline disparity number for the callout: how much higher
-    is mean Risk-Exposure in rural NC-08 vs. suburban/urban NC-08, and how
-    much SPARSER is rural data (pct_low_confidence gap) — the brief's
-    Limitations point that rural counties have sparser incident records than
-    the Charlotte-adjacent suburbs needs a number attached to it, not just a
-    sentence, so the two numbers ship together here.
+    """The single headline disparity number for the callout: the RATIO of
+    mean Risk-Exposure in rural NC-08 vs. suburban/urban NC-08 (a value < 1
+    means rural scores LOWER — on the real NC-08 data it does, at ~0.44,
+    plausibly reflecting sparser rural incident reporting rather than lower
+    real risk, see docs/LIMITATIONS.md; a value > 1 would mean the opposite —
+    this function does not assume either direction), and how much SPARSER is
+    rural data (pct_low_confidence gap) — the brief's Limitations point that
+    rural counties have sparser incident records than the Charlotte-adjacent
+    suburbs needs a number attached to it, not just a sentence, so the two
+    numbers ship together here.
     """
     by_rural = summary["by_rural_suburban"].set_index("rural_flag")
     if True not in by_rural.index or False not in by_rural.index:

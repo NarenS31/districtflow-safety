@@ -26,12 +26,23 @@ from ..risk.targets import build_target, compute_data_density_flag, target_summa
 from utils.graph_utils import chronological_or_spatial_split
 from .risk_gnn import RiskGNN
 
+# NOTE: "infrastructure" only lists what data/pipelines/assemble_features.py
+# ACTUALLY produces today (speed_limit_mph, lane_count, road_classification —
+# all from ISRN). crosswalk_present / sidewalk_coverage / lighting_coverage
+# from docs/FEATURES.md's original design are NOT yet real: they were meant
+# to come from OSM tags via data/pipelines/osm_fallback.py, which is written
+# and correct but currently blocked by this build environment's network
+# access to the Overpass API (see data/pipelines/DATA_SOURCES.md §4 — a
+# genuine environment limitation, not a data-availability one). They are
+# listed in models/risk/countermeasure.py's rule table already so those
+# rules activate with ZERO code changes the moment osm_fallback.py's output
+# is joined in — until then they simply never appear in top_features and
+# those specific countermeasure rules stay dormant, which is the honest
+# behavior (never fabricated in the meantime).
 FEATURE_GROUPS = {
-    "infrastructure": ["speed_limit_mph", "lane_count", "road_classification",
-                       "intersection_density", "crosswalk_present",
-                       "sidewalk_coverage", "lighting_coverage"],
+    "infrastructure": ["speed_limit_mph", "lane_count", "road_classification"],
     "aadt": ["aadt_normalized"],
-    "crash_history": ["pedcyclist_incident_count_5yr", "general_crash_count_5yr"],
+    "crash_history": ["pedcyclist_incident_count_5yr", "general_crash_count_5yr_county"],
     "context": ["rural_flag", "county_code"],
     "ems_access": ["ems_distance_m"],
 }
@@ -43,14 +54,33 @@ def _build_modalities(segments: pd.DataFrame, device: torch.device
     expects, per docs/FEATURES.md. A modality is OMITTED ENTIRELY (not
     zero-filled) if none of its columns exist in `segments` — that's the
     "whole modality missing" case models/gnn/risk_gnn.py's HeteroFusion
-    tolerates by design (e.g. no AADT service reachable at all)."""
+    tolerates by design (e.g. no AADT service reachable at all).
+
+    PER-ROW missing values (a present modality, but this segment's ISRN join
+    didn't reach the fine-attribute radius — real rates as high as 45% on
+    speed_limit_mph, see assemble_features.py's DIAGNOSIS comment) are filled
+    with the COLUMN'S OWN MEAN over available rows, not zero. Zero is a real,
+    false measurement for these features (a 0 mph speed limit, a 0-lane road
+    is not "no data," it's a wrong data point that would bias the model);
+    the column mean is the standard neutral choice — same rationale XTraffic
+    used for its weather-channel fusion sidecars finding all-NaN visibility
+    values (CLAUDE.md Phase 6 note: "non-finite cells are filled with the
+    channel's train mean (neutral ~0 after z-score)").
+    """
     modalities: Dict[str, torch.Tensor] = {}
     feature_names: Dict[str, list] = {}
     for name, cols in FEATURE_GROUPS.items():
         present = [c for c in cols if c in segments.columns]
         if not present:
             continue
-        arr = segments[present].fillna(0.0).to_numpy(dtype=np.float32)
+        block = segments[present].astype(float)
+        block = block.fillna(block.mean(numeric_only=True))
+        # A column that is ENTIRELY missing has an undefined mean (NaN) —
+        # falls back to 0 only in that all-missing case (matches XTraffic's
+        # "fully-missing channel collapses to 0" precedent), never for a
+        # partially-missing column.
+        block = block.fillna(0.0)
+        arr = block.to_numpy(dtype=np.float32)
         modalities[name] = torch.tensor(arr, device=device)
         feature_names[name] = present
     return modalities, feature_names

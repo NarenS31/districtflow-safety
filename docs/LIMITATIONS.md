@@ -12,14 +12,26 @@ sensor/GIS coverage, denser NCDOT crash reporting infrastructure, and denser
 ped/cyclist incident records than the rural counties in the district —
 Anson, Richmond, Montgomery, Stanly, and much of Robeson. This is not a
 modeling artifact; it reflects real, uneven public-safety data investment
-across the district. Consequences:
+across the district. **Measured on the real trained model:**
 
+- Mean Risk-Exposure in the 5 rural counties comes out at **~44% of** the 3
+  suburban/urban counties' (`models/risk/disparity.disparity_gap()`, run
+  against `evaluation/results/segment_scores.parquet`). Read this as evidence
+  of the REPORTING gap, not a safety finding: Mecklenburg alone holds 2,606
+  of the district's 3,454 real recorded ped/cyclist incidents (2021-2025) —
+  the model was trained on those counts, and a county with far fewer
+  recorded incidents will predict a lower rate whether or not its roads are
+  actually safer.
 - A rural segment with zero recorded ped/cyclist incidents may be genuinely
   safer, OR may simply be under-reported. `models/risk/targets.py`'s
-  `data_density_flag` exists specifically to separate these two cases: it
-  flags a segment low-confidence when its COUNTY's total 5-year incident
-  count falls below a floor (`min_county_incidents` in `configs/model.yaml`),
-  not just when the segment itself has zero incidents.
+  `data_density_flag` flags a segment low-confidence when it's missing a
+  fine-grained ISRN attribute match, an EMS routing distance, or sits in a
+  county whose total 5-year incident count falls below a floor
+  (`min_county_incidents` in `configs/model.yaml`). On the real NC-08 data
+  this is **62.7% of all segments** — the ISRN fine-attribute gap (~45%
+  missing speed limit, ~25% missing lane count) turned out to be the
+  dominant driver, not cleanly split by rural/urban the way the incident-count
+  gap is (see `data/pipelines/DATA_SOURCES.md` §1's DIAGNOSIS note).
 - `models/risk/disparity.py`'s `disparity_gap()` reports the rural-vs-suburban
   gap in `pct_low_confidence` alongside the Risk-Exposure ratio specifically
   so this sparsity is a visible number, not an implicit caveat.

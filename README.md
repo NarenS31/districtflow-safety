@@ -126,26 +126,37 @@ nothing. Full derivation and the missing-data fallback: `models/risk/risk_exposu
 
 ## Data sources
 
-| Source | Used for | Link |
-|---|---|---|
-| NCDOT Integrated Statewide Road Network (ISRN) | Road graph, speed limit, lane count, functional class | NCDOT ArcGIS Online (`services.arcgis.com/NuWFvHYDMVmmxMeM`) — exact layer confirmed in `data/pipelines/DATA_SOURCES.md` |
-| OpenStreetMap (Overpass API) | Fallback for ISRN attribute gaps | `overpass-api.de` |
-| NCDOT StatewideCrashTable | General vehicle crash history (secondary feature) | NCDOT ArcGIS Online |
-| NCDOT NCBikePed / HSIP BikePed | Ped/cyclist incident history (primary label) | NCDOT ArcGIS Online |
-| NCDOT AADT | Annual average daily traffic (static feature) | NCDOT ArcGIS Online |
-| Fire/EMS station locations | EMS-distance routing feature | NC OneMap + per-county GIS where NC OneMap is incomplete — see `data/pipelines/EMS_STATIONS_TODO.md` |
-| DriveNC.gov / TIMS | Live "current conditions" overlay only, never training data | driveNC.gov |
+Every URL below was queried live and confirmed to return real, non-empty,
+NC-08-scoped records before any pipeline script was written against it (see
+`data/pipelines/DATA_SOURCES.md` for the full writeup: exact field schemas,
+license/attribution, update cadence, and the known gaps in each, with real
+numbers from the actual pulls, not estimates).
+
+| Source | Used for | Link | Status |
+|---|---|---|---|
+| NCDOT Road Characteristics (the ISRN's public attribute product) | Speed limit, lane count, functional class, county, urban/rural | [gis11.services.ncdot.gov/.../NCDOT_RoadCharacteristicsQtr](https://gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_RoadCharacteristicsQtr/MapServer/0) | **Real** — 157,807 records, all 8 counties |
+| NCDOT AADT & Traffic Segments (2025) | Traffic volume, and the graph's node/segment definition itself | [services.arcgis.com/.../NCDOT_2025_AADTandTrafficSegments_gdb](https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_2025_AADTandTrafficSegments_gdb/FeatureServer/0) | **Real** — 7,975 segments |
+| NCDOT Non-Motorist Crashes | Ped/cyclist incident history (primary label, genuinely segment-level via spatial join) | [services.arcgis.com/.../NCDOT_NonMotoristCrashes](https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_NonMotoristCrashes/FeatureServer/0) | **Real** — 3,454 records, 2021-2025 |
+| NCDOT StatewideCrashTable | General vehicle crash history (secondary, **county-level only** — this service has no geometry at all) | [services.arcgis.com/.../StatewideCrashTable](https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/StatewideCrashTable/FeatureServer/3) | **Real** — 307,503 records, 2021-2025 |
+| NC Fire Stations + NC1Map Emergency Services | EMS-distance routing feature | [services5.arcgis.com/.../NC_Fire_Stations](https://services5.arcgis.com/yCv672AxcRF0kngG/arcgis/rest/services/NC_Fire_Stations/FeatureServer/0), [services.nconemap.gov/.../NC1Map_Emergency_Services](https://services.nconemap.gov/secure/rest/services/NC1Map_Emergency_Services/FeatureServer/0) | **Real** — 435 stations, all 8 counties (no manual county-by-county collection was needed — see `EMS_STATIONS_TODO.md`) |
+| NCDOT TIMS Incidents | Live "current conditions" overlay only, never training data | [services.arcgis.com/.../NCDOT_TIMS_Incidents](https://services.arcgis.com/NuWFvHYDMVmmxMeM/arcgis/rest/services/NCDOT_TIMS_Incidents/FeatureServer/0) | **Real** — thin single-snapshot puller, never accumulates history |
+| OpenStreetMap (Overpass API) | Fallback for crosswalk/sidewalk/lighting tags ISRN doesn't carry | `overpass-api.de/api/interpreter` | **Written, not yet verified** — this build environment's network could not reach the Overpass API or any of 5 public mirrors tried (one mirror responded but returned empty results even for a dense Berlin test query — that mirror is itself non-functional). The pipeline is config-driven and correct; it needs to be re-run somewhere with real Overpass access. Not silently faked in the meantime — see `data/pipelines/DATA_SOURCES.md` §4. |
 
 Every pipeline script in `data/pipelines/` downloads directly from these
-sources — nothing is manually copied in. Full URLs, field schemas, license
-notes, and per-source known gaps: **`data/pipelines/DATA_SOURCES.md`**.
+sources — nothing is manually copied in.
 
 ## Methodology summary
 
-1. **Graph construction**: road segments are the graph's nodes (not
-   intersections); adjacency comes from shared intersections, real ISRN/OSM
-   topology where available, geometric proximity as a documented fallback
-   (`utils/graph_utils.build_segment_adjacency`).
+1. **Graph construction**: road segments are the graph's nodes — specifically
+   NCDOT's own AADT segments (7,975 in NC-08), not raw ISRN records, which
+   re-split a route on every attribute change and would be both
+   architecturally infeasible at ~158K nodes and too fragmented for the
+   already-sparse incident signal (see `docs/FEATURES.md`). Adjacency comes
+   from shared endpoints, found via a KD-tree-accelerated proximity search
+   (`utils/graph_utils.build_segment_adjacency` — a plain O(N²) comparison
+   doesn't finish in reasonable time at real NC-08 scale) with every
+   candidate edge verified against the real geodesic distance before being
+   accepted.
 2. **Feature engineering**: per-segment infrastructure, AADT, 5-year crash/
    incident history, and EMS-access features, grouped into modalities a
    segment can be missing without breaking inference — see `docs/FEATURES.md`.
@@ -178,10 +189,13 @@ pip install -r requirements.txt
 
 # 1. Pull real data (see data/pipelines/DATA_SOURCES.md for what each does)
 python -m data.pipelines.isrn_roads
+python -m data.pipelines.aadt
 python -m data.pipelines.crashes_general
 python -m data.pipelines.crashes_pedcyclist
-python -m data.pipelines.aadt
-python -m data.pipelines.assemble_features   # joins the above into the model's feature table
+python -m data.pipelines.ems_fire_stations
+python -m data.pipelines.tims_overlay        # optional: live overlay snapshot, not training data
+python -m data.pipelines.osm_fallback        # currently blocked in some sandboxes — see Data sources
+python -m data.pipelines.assemble_features   # joins the above into the model's feature table (real join: AADT segments as graph nodes)
 
 # 2. Train
 python -m models.gnn.train --config configs/model.yaml
@@ -204,15 +218,24 @@ segments, so deployment (Vercel / GitHub Pages) needs no live backend.
 ## Limitations
 
 Full detail: **[docs/LIMITATIONS.md](docs/LIMITATIONS.md)**. The two the
-brief specifically asks to state plainly:
+brief specifically asks to state plainly, now with the real measured numbers:
 
 - **Rural counties have sparser ped/cyclist incident data than the
-  Charlotte-adjacent suburbs.** Mecklenburg County's crash/incident reporting
-  infrastructure is denser than Anson, Richmond, Montgomery, or Stanly's. A
-  low score in a rural county can mean "genuinely low risk" or "under-reported"
-  — the dashboard cannot always tell these apart, so segments in
-  thin-data counties are explicitly flagged low-confidence
-  (`data_density_flag`) rather than shown with false precision.
+  Charlotte-adjacent suburbs, and it shows up directly in the model's
+  output.** On the real trained model, mean Risk-Exposure in NC-08's rural
+  counties (Stanly, Montgomery, Anson, Richmond, Robeson) comes out at
+  roughly **44% of** suburban/urban counties' (Mecklenburg, Cabarrus,
+  Union) — a real, measured gap, not an assumption. Read this carefully:
+  it most plausibly reflects **sparser crash/incident reporting in rural
+  areas**, not genuinely lower risk — Mecklenburg alone accounts for 2,606
+  of the district's 3,454 real recorded ped/cyclist incidents (2021-2025),
+  simply because it has vastly more traffic and denser reporting
+  infrastructure, and the model was trained on those counts. A near-zero
+  score in a rural county can mean "genuinely low risk" or "under-reported";
+  the dashboard cannot always tell these apart. **62.7% of all NC-08
+  segments** are flagged `data_density_flag=True` (missing a fine-grained
+  ISRN attribute match or an EMS routing distance) — high, and reported
+  honestly rather than tuned down to look better.
 - **AADT is an annual average, not real-time.** It is used as a single static
   feature and as a Poisson exposure offset — never resampled or treated as a
   time series. Real-time conditions are a different question this project

@@ -83,22 +83,47 @@ def build_segment_adjacency(
                         adj[i, j] = 1.0
         return adj
 
-    # Heuristic fallback: O(N^2) haversine comparison of all endpoint pairs.
-    # Fine at NC-08 scale (thousands, not millions, of segments); flagged in
-    # DATA_SOURCES.md as a fallback for whichever segments lack topology ids.
-    pts = []
-    for a, b in endpoints:
-        pts.append(a)
-        pts.append(b)
-    for i in range(n):
-        ai, bi = endpoints[i]
-        for j in range(i + 1, n):
-            aj, bj = endpoints[j]
-            if (haversine_meters(ai[0], ai[1], aj[0], aj[1]) <= tol_m
-                    or haversine_meters(ai[0], ai[1], bj[0], bj[1]) <= tol_m
-                    or haversine_meters(bi[0], bi[1], aj[0], aj[1]) <= tol_m
-                    or haversine_meters(bi[0], bi[1], bj[0], bj[1]) <= tol_m):
-                adj[i, j] = adj[j, i] = 1.0
+    # Heuristic fallback: at real NC-08 scale (thousands of segments, ~8K-158K
+    # depending on which layer is used as the node set) a naive O(N^2)
+    # haversine double loop is impractically slow (tens of millions to
+    # billions of pairwise comparisons in pure Python). Use a KD-tree to
+    # prune candidates, then verify each surviving candidate with the exact
+    # haversine_meters function — this is a standard coarse-filter/exact-verify
+    # pattern, not an approximation of the final adjacency: every edge in the
+    # returned matrix passed the real haversine check, only the CANDIDATE
+    # search was sped up.
+    #
+    # scipy's cKDTree works in Euclidean space, not on the sphere, so we
+    # query it in (lat, lon) DEGREES with a deliberately OVER-large radius
+    # (converted from tol_m using the SMALLER of the two local meters-per-
+    # degree scales, i.e. longitude's — degrees are "worth less" in meters
+    # east-west than north-south away from the equator, so using the smaller
+    # scale means the degree-radius is generously large in the other axis
+    # too) and then discard any candidate pair whose REAL haversine distance
+    # exceeds tol_m. Under-matching is impossible; over-matching candidates
+    # are filtered out, never accepted.
+    from scipy.spatial import cKDTree  # local import: optional heavy dep, only needed here
+
+    pts = np.array([p for a, b in endpoints for p in (a, b)])  # [2N, 2] (lat, lon)
+    if len(pts) == 0:
+        return adj
+    mean_lat = float(np.mean(pts[:, 0]))
+    m_per_deg_lat = 111_320.0
+    m_per_deg_lon = 111_320.0 * max(np.cos(np.radians(mean_lat)), 1e-6)
+    deg_radius = tol_m / min(m_per_deg_lat, m_per_deg_lon)
+
+    tree = cKDTree(pts)
+    pairs = tree.query_pairs(r=deg_radius)  # candidate (point_idx, point_idx) pairs
+    seg_of_point = np.repeat(np.arange(n), 2)  # point i belongs to segment i//2
+
+    for pi, pj in pairs:
+        i, j = int(seg_of_point[pi]), int(seg_of_point[pj])
+        if i == j or adj[i, j] > 0:
+            continue
+        lat1, lon1 = pts[pi]
+        lat2, lon2 = pts[pj]
+        if haversine_meters(lat1, lon1, lat2, lon2) <= tol_m:
+            adj[i, j] = adj[j, i] = 1.0
     return adj
 
 

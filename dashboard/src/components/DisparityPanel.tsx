@@ -40,10 +40,17 @@ export default function DisparityPanel({ data }: Props) {
   );
 
   const gap = data.gap;
-  const ratioText =
-    Number.isFinite(gap.rural_vs_suburban_exposure_ratio)
-      ? `${gap.rural_vs_suburban_exposure_ratio.toFixed(2)}×`
-      : 'n/a';
+  const ratio = gap.rural_vs_suburban_exposure_ratio;
+  // Direction-agnostic phrasing on purpose: the real NC-08 numbers came out
+  // with rural Risk-Exposure LOWER than suburban/urban, not higher —
+  // plausibly reflecting sparser crash/incident reporting in rural counties
+  // rather than genuinely lower risk (see README Limitations). Don't
+  // hardcode an assumed direction; state whichever way the real ratio goes.
+  const ratioText = Number.isFinite(ratio)
+    ? ratio >= 1
+      ? `${ratio.toFixed(2)}× higher than`
+      : `${(ratio * 100).toFixed(0)}% of`
+    : null;
 
   return (
     <div className="p-4 space-y-3">
@@ -55,16 +62,22 @@ export default function DisparityPanel({ data }: Props) {
       </div>
 
       <div className="rounded-md border border-grid-light dark:border-grid-dark p-3 text-xs">
-        <p>
-          Rural NC-08 segments average{' '}
-          <span className="font-semibold tabular-nums">{ratioText}</span> the
-          Risk-Exposure of suburban/urban segments, with{' '}
-          <span className="font-semibold tabular-nums">
-            {gap.rural_vs_suburban_confidence_gap_pct.toFixed(0)} pp
-          </span>{' '}
-          more segments flagged low-confidence (sparser crash/incident records
-          — see Limitations).
-        </p>
+        {ratioText ? (
+          <p>
+            Rural NC-08 segments average{' '}
+            <span className="font-semibold tabular-nums">{ratioText}</span>{' '}
+            suburban/urban segments' Risk-Exposure, with{' '}
+            <span className="font-semibold tabular-nums">
+              {Math.abs(gap.rural_vs_suburban_confidence_gap_pct).toFixed(0)} pp
+            </span>{' '}
+            {gap.rural_vs_suburban_confidence_gap_pct >= 0 ? 'more' : 'fewer'} rural
+            segments flagged low-confidence. A LOWER rural score plausibly
+            reflects sparser crash/incident reporting in rural counties, not
+            necessarily lower real risk — see Limitations.
+          </p>
+        ) : (
+          <p>Disparity ratio unavailable (insufficient data in one group).</p>
+        )}
       </div>
 
       <div style={{ width: '100%', height: 260 }}>
