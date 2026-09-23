@@ -1,0 +1,53 @@
+name: Test
+
+# Runs the Python unit suite + a dashboard type-check/build on every push and
+# PR. Deliberately does NOT deploy anything — dashboard/public/data is a
+# generated artifact from real model output (gitignored, never committed as
+# placeholder data), so there is nothing honest to deploy until the full
+# data -> train -> export pipeline has actually run against real NC-08 data.
+# See README.md "Running it" for that pipeline and how deployment is wired
+# once it has.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/ -v
+
+  dashboard-typecheck-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # No real dashboard/public/data/*.json exists in a fresh checkout (it's
+      # gitignored, generated from real model output) — seed placeholder
+      # files EXPLICITLY LABELED as such purely so `vite build` has files to
+      # bundle path references against. Never used to claim real numbers;
+      # CI only checks the build succeeds, not what's in these files.
+      - name: Seed placeholder data for build-only verification
+        run: |
+          mkdir -p public/data
+          echo '{"type":"RecordList","note":"CI placeholder, not real data","records":[]}' > public/data/segments.json
+          echo '[]' > public/data/priority_list.json
+          echo '{"by_county":[],"by_rural_suburban":[],"by_county_rural":[],"gap":{"rural_vs_suburban_exposure_ratio":null,"rural_vs_suburban_confidence_gap_pct":null}}' > public/data/disparity.json
+          echo '{}' > public/data/counterfactuals.json
+          echo '{"n_segments":0,"generated_from":"ci-placeholder"}' > public/data/meta.json
+      - run: npm run build
