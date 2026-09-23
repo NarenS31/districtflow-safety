@@ -1,0 +1,12 @@
+# The Risk-Exposure Index's one tunable knob. Formula documented in full in
+# models/risk/risk_exposure.py and the README (never bury this — brief §4).
+#
+#   risk_exposure = risk_norm * (1 + w_ems * ems_norm)
+#
+# w_ems = 0    -> Risk-Exposure reduces to plain normalized risk score
+#                 (EMS distance ignored).
+# w_ems = 1.0  -> a segment at the district's MAXIMUM EMS distance gets up
+#                 to 2x its base risk score (default).
+# w_ems > 1.0  -> EMS access dominates the ranking more heavily; use for a
+#                 "worst-case response gap" view of the dashboard.
+w_ems: 1.0

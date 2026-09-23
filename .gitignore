@@ -1,0 +1,25 @@
+# Data — never commit raw or processed data; pipelines that PRODUCE it are committed.
+data/raw/
+data/processed/
+
+# Model checkpoints (large binaries; retrain via models/gnn/train.py)
+models/gnn/checkpoints/
+*.pt
+
+# Evaluation outputs (regenerate via evaluation/*.py)
+evaluation/results/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node / dashboard
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# OS / editor
+.DS_Store
+.vscode/

@@ -1,0 +1,23 @@
+# RiskGNN training config — no magic numbers in code, everything here.
+seed: 42
+train_ratio: 0.7
+val_ratio: 0.15   # remainder (0.15) is test
+epochs: 300
+lr: 0.01
+grad_clip: 5.0
+early_stop_patience: 20
+
+# Below this many total 5-year ped/cyclist incidents recorded IN A COUNTY,
+# every segment in that county is flagged data_density_flag=True regardless
+# of its own individual count (models/risk/targets.py). Tune with real
+# county totals once data/pipelines lands — 15 is a conservative starting
+# point, not a validated threshold.
+min_county_incidents: 15
+
+model:
+  hidden_channels: 32
+  n_blocks: 4
+  embed_dim: 10
+  gcn_order: 2
+  dropout: 0.3
+  use_semantic: true   # MOD 1 ablation switch, ported from XTraffic
