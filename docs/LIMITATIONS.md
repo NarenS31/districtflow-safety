@@ -59,6 +59,29 @@ the base risk score alone for that segment, and `ems_distance_available` is
 surfaced so the dashboard can show that gap explicitly rather than implying
 false precision.
 
+## The county-level crash feature dominates raw feature attribution
+
+Measured on the real Top-25 priority list: `general_crash_count_5yr_county`
+is the explainer's #1 attributed feature for the large majority of
+high-priority segments (7 of the first 8 checked), with importance scores
+around 0.9. This makes mechanistic sense — it's a large-magnitude number
+(tens of thousands) that's IDENTICAL for every segment in the same county
+(see `docs/FEATURES.md` — `StatewideCrashTable` has no geometry, so this
+can only be county-level), so the model leans on it as a strong, easy
+signal. The practical consequence: raw top-feature rankings often explain
+"why is this segment risky" with "because it's in a high-crash county,"
+which is true but not segment-specific.
+
+This is why `models/risk/countermeasure.py` deliberately has **no rule** for
+`general_crash_count_5yr_county` (unlike `pedcyclist_incident_count_5yr`,
+which IS genuinely segment-level and does have a rule under "crash_history").
+"Reduce county-wide crashes" isn't an actionable per-segment engineering
+countermeasure, so the suggestion logic correctly falls through this feature
+to the next genuinely local, actionable one (speed limit, lane count, etc.)
+in the segment's ranked feature list — verified in the real priority list
+output, not just designed for in theory. State this plainly rather than
+re-weighting the feature to look more "segment-specific" than it honestly is.
+
 ## The explainer measures alignment with the model, not ground truth
 
 Per-segment feature attributions (`models/explainer/explain.py`) show which
@@ -69,6 +92,27 @@ risk on that segment. A model trained on sparse, uneven data can learn a
 confident-looking but data-artifact-driven attribution. Countermeasure
 suggestions (`models/risk/countermeasure.py`) are therefore a starting point
 for engineering review, not a substitute for it.
+
+## On the current Top-25, speed-limit counterfactuals show ~zero effect
+
+Checked directly, not assumed: across all 25 segments in the real priority
+list, the `reduce_speed_limit_25` intervention's predicted score delta is
+effectively 0.00000 for every one of them. This is consistent with (not
+contradicted by) the finding above — `speed_limit_mph`'s explainer
+importance is uniformly low (0.013-0.021) on this same Top-25, because their
+scores are dominated by `general_crash_count_5yr_county`, which no
+intervention preset touches (it isn't a realistic planner-toggleable lever).
+The two independent methods (explainer importance and counterfactual
+sensitivity) agree with each other, which is a real methodological
+cross-check in this system's favor — but it also means the what-if layer is
+currently most informative on segments where a genuinely local feature (not
+the county aggregate) is the top driver; check `explanation_confidence` and
+the feature list before reading a near-zero counterfactual delta as "this
+intervention wouldn't help," since it may just mean this segment's score
+isn't driven by anything the current 5 interventions can touch. `crosswalk`/
+`sidewalk`/`lighting` interventions correctly report "not simulated" rather
+than a fabricated effect, since those features aren't real yet (blocked
+Overpass pull, see Data sources).
 
 ## The counterfactual "what-if" layer is a model simulation, not a guarantee
 

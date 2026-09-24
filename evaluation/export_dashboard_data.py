@@ -79,7 +79,24 @@ def export_segments(scores: pd.DataFrame) -> None:
 def export_priority_and_counterfactuals(checkpoint_path: str, features_path: str,
                                         adjacency_path: str, scores_path: str,
                                         n: int) -> None:
-    priority = build_priority_list(scores_path, checkpoint_path, features_path, n)
+    # The explainer optimization behind build_priority_list is expensive
+    # (a mask-learning loop per segment, over the whole graph, repeated for
+    # confidence reruns) — reuse evaluation/results/priority_list.json if
+    # `python -m evaluation.priority_list` was already run for this exact n,
+    # rather than silently recomputing the same 25+ explanations a second
+    # time. Any mismatch (missing file, wrong count) falls back to a real
+    # recompute — this is a speed optimization, never a correctness shortcut.
+    cached_path = "evaluation/results/priority_list.json"
+    priority = None
+    if os.path.exists(cached_path):
+        with open(cached_path) as f:
+            cached = json.load(f)
+        if len(cached) == n:
+            print(f"[export] reusing cached {cached_path} ({n} entries, "
+                 f"skipping recompute)")
+            priority = cached
+    if priority is None:
+        priority = build_priority_list(scores_path, checkpoint_path, features_path, n)
     with open(os.path.join(OUT_DIR, "priority_list.json"), "w") as f:
         json.dump(priority, f, indent=2)
 

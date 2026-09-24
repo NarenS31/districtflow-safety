@@ -26,6 +26,39 @@ a gap exists (sparse rural data, missing EMS records), it is flagged
 explicitly rather than filled in. See [Limitations](#limitations) and
 [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
 
+## Current status — real results, not a projection
+
+The full pipeline has been run end to end against real NCDOT/NC OneMap data
+(not synthetic placeholders). Headline numbers, honestly reported:
+
+- **5,744 real road segments** scored (NCDOT's own AADT-segment network in
+  NC-08, after dropping ~2,231 bbox false-positives outside the district —
+  see `docs/FEATURES.md`), trained on **3,141 real ped/cyclist incidents**
+  (2021-2025) spatially matched to those segments.
+- Training converges cleanly (Poisson NLL, early-stopped ~epoch 48) with no
+  shape or gradient errors on the real feature table.
+- **62.7% of segments are flagged low-confidence** (`data_density_flag`) —
+  high, and reported as such rather than tuned down; the dominant cause is
+  ISRN's own fine-attribute coverage gap (~45% missing speed limit, ~25%
+  missing lane count), not primarily a rural/urban split.
+- **Rural NC-08 counties show ~44% of suburban/urban counties' mean
+  Risk-Exposure** — most plausibly a reporting-density artifact (Mecklenburg
+  alone holds 2,606 of the district's 3,454 recorded incidents), not
+  evidence rural roads are safer. See Limitations.
+- The explainer and counterfactual layers agree with each other on an honest
+  null finding: on the current Top-25 priority list, `speed_limit_mph` has
+  low attributed importance (~0.01-0.02) and a `reduce_speed_limit_25`
+  counterfactual correspondingly shows ~zero predicted effect — because
+  those segments' scores are dominated by a county-level (not segment-level)
+  crash-count feature. See Limitations for what this does and doesn't mean.
+- 28/28 unit tests passing (`tests/`), including a regression test for a
+  real in-place-autograd bug and a real `data_density_flag` logic bug, both
+  found by actually running the pipeline, not just by code review.
+
+Genuinely not yet done: `crosswalk_present`/`sidewalk_coverage`/
+`lighting_coverage` features (blocked on OSM/Overpass access — see Data
+sources), and the dashboard is built but not yet deployed to a public URL.
+
 ## Architecture
 
 ```mermaid
@@ -244,8 +277,15 @@ brief specifically asks to state plainly, now with the real measured numbers:
 
 ## Manual TODOs (not fabricated around)
 
-- Exact EMS/fire station locations for counties without a clean centralized
-  source — see `data/pipelines/EMS_STATIONS_TODO.md`.
+- ~~Exact EMS/fire station locations for counties without a clean centralized
+  source~~ — turned out not to be needed: NC OneMap has real, clean coverage
+  for all 8 counties (435 stations). See `data/pipelines/EMS_STATIONS_TODO.md`
+  for the per-county confirmation and honest caveats (no independent
+  cross-check against county GIS/911 rosters was performed).
+- Re-running `data/pipelines/osm_fallback.py` in an environment with working
+  Overpass API access — it's written and correct but blocked by this build
+  sandbox's network (see Data sources above). Needed before
+  `crosswalk_present`/`sidewalk_coverage`/`lighting_coverage` become real.
 - Outreach to county planning offices, Safe Routes to School coordinators, or
   Vision Zero contacts, for real-world validation of the Top-N list.
 - The demo video's opening anecdote/intersection — a narrative choice, not a
