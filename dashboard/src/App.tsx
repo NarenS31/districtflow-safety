@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api/client';
 import DisparityPanel from './components/DisparityPanel';
+import ErrorBoundary from './components/ErrorBoundary';
+import FloatingPanel from './components/FloatingPanel';
 import Header from './components/Header';
 import MapView from './components/MapView';
 import SegmentDetail from './components/SegmentDetail';
@@ -38,68 +40,76 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen w-screen relative overflow-hidden bg-asphalt-base">
+      {/* The map is the hero — full-bleed, base layer, everything else floats over it. */}
+      <ErrorBoundary
+        fallback={
+          <div className="h-full flex flex-col items-center justify-center p-8 text-center gap-2 bg-asphalt-base">
+            <p className="text-sm font-medium text-ink-primary">Map view hit an unexpected error</p>
+            <p className="text-xs text-ink-secondary max-w-md">
+              The priority list, segment detail, and disparity panels are
+              unaffected — every score is still real and live.
+            </p>
+          </div>
+        }
+      >
+        <MapView data={segments} selectedId={selectedId} onSelect={setSelectedId} />
+      </ErrorBoundary>
+
       <Header nSegments={nSegments} />
 
       {loadError && (
-        <div className="bg-status-critical/10 text-status-critical text-xs px-4 py-2">
-          Failed to load dashboard data — has{' '}
-          <code>evaluation/export_dashboard_data.py</code> been run? ({loadError})
+        <div className="pointer-events-none fixed inset-x-0 top-20 z-30 flex justify-center px-4">
+          <div className="glass-panel pointer-events-auto rounded-lg px-3 py-2 text-xs text-risk-high">
+            Failed to load dashboard data — has <code className="font-data">evaluation/export_dashboard_data.py</code> been run? ({loadError})
+          </div>
         </div>
       )}
 
-      <div className="flex-1 flex min-h-0">
-        <aside className="w-80 border-r border-grid-light dark:border-grid-dark flex flex-col min-h-0">
-          <div className="flex border-b border-grid-light dark:border-grid-dark text-xs">
-            <TabButton active={leftTab === 'priority'} onClick={() => setLeftTab('priority')}>
-              Top-N priority
-            </TabButton>
-            <TabButton active={leftTab === 'disparity'} onClick={() => setLeftTab('disparity')}>
-              Disparity
-            </TabButton>
-          </div>
-          <div className="flex-1 min-h-0 overflow-hidden">
-            {leftTab === 'priority' ? (
-              <TopNPanel entries={priority} selectedId={selectedId} onSelect={setSelectedId} />
-            ) : (
-              <div className="h-full overflow-y-auto">
-                <DisparityPanel data={disparity} />
-              </div>
-            )}
-          </div>
-        </aside>
+      {/* Leaderboard / disparity — top-left on desktop, a bottom sheet on
+          mobile that yields to the segment detail sheet once something is
+          selected (two competing bottom sheets would fight for the same
+          screen real estate on a phone). */}
+      <div
+        className={
+          selectedEntry
+            ? 'hidden md:flex pointer-events-none fixed z-20 top-20 left-4'
+            : 'flex pointer-events-none fixed z-20 inset-x-0 bottom-0 p-3 md:inset-x-auto md:bottom-auto md:p-0 md:top-20 md:left-4'
+        }
+      >
+        <FloatingPanel
+          title="Priority segments"
+          side="left"
+          collapsible
+          tabs={[
+            { key: 'priority', label: 'Top 25' },
+            { key: 'disparity', label: 'Disparity' },
+          ]}
+          activeTab={leftTab}
+          onTabChange={(k) => setLeftTab(k as LeftTab)}
+        >
+          {leftTab === 'priority' ? (
+            <TopNPanel entries={priority} selectedId={selectedId} onSelect={setSelectedId} />
+          ) : (
+            <DisparityPanel data={disparity} />
+          )}
+        </FloatingPanel>
+      </div>
 
-        <main className="flex-1 min-w-0">
-          <MapView data={segments} onSelect={setSelectedId} />
-        </main>
-
-        <aside className="w-96 border-l border-grid-light dark:border-grid-dark min-h-0">
-          <SegmentDetail entry={selectedEntry} counterfactuals={counterfactuals} />
-        </aside>
+      {/* Segment detail — top-right on desktop, a bottom sheet on mobile.
+          Always mounted (never display:none) so SegmentDetail's own
+          opacity/translate transition can actually animate the slide-in —
+          toggling display would make the entry transition invisible since
+          a browser can't interpolate from a non-rendered state. Visibility
+          when nothing is selected is handled by SegmentDetail itself
+          (opacity-0 + pointer-events-none), not by this wrapper. */}
+      <div className="flex pointer-events-none fixed z-20 inset-x-0 bottom-0 p-3 md:inset-x-auto md:bottom-auto md:p-0 md:top-20 md:right-4">
+        <SegmentDetail
+          entry={selectedEntry}
+          counterfactuals={counterfactuals}
+          onClose={() => setSelectedId(null)}
+        />
       </div>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        active
-          ? 'flex-1 px-3 py-2 font-medium border-b-2 border-risk-450 text-risk-600 dark:text-risk-300'
-          : 'flex-1 px-3 py-2 text-ink-secondary-light dark:text-ink-secondary-dark hover:bg-grid-light dark:hover:bg-grid-dark'
-      }
-    >
-      {children}
-    </button>
   );
 }

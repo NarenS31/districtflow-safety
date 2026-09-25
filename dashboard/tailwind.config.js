@@ -1,45 +1,77 @@
 /** @type {import('tailwindcss').Config} */
-// Colors are the dataviz skill's validated reference palette (see
-// docs/ for the validation run) — swap values here, not ad hoc in components.
+// AfterImpact NC design tokens. Grounded in the subject matter (asphalt,
+// signage, engineering precision) rather than a generic SaaS palette —
+// see the design token summary in the redesign commit message for the
+// full rationale on each choice.
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
-  darkMode: ['class', '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
-        surface: {
-          light: '#fcfcfb',
-          dark: '#1a1a19',
-          page: { light: '#f9f9f7', dark: '#0d0d0d' },
+        // Asphalt base — dark by default, not a light theme with a
+        // dark-mode toggle bolted on.
+        asphalt: {
+          base: '#14161A',   // page background
+          panel: '#1C1F26',  // floating glass panel surface (used with alpha + blur)
+          line: '#2A2E37',   // hairline dividers that carry meaning (tier boundaries etc.)
         },
         ink: {
-          primary: { light: '#0b0b0b', dark: '#ffffff' },
-          secondary: { light: '#52514e', dark: '#c3c2b7' },
-          muted: '#898781',
+          primary: '#F2F3F5',
+          secondary: '#9AA1AC',
+          muted: '#676E7A',
         },
-        grid: { light: '#e1e0d9', dark: '#2c2c2a' },
-        // Sequential (risk magnitude) — single hue, light -> dark.
+        // Risk gradient anchors — the *shape* (quantile breakpoints) is
+        // computed at runtime from the real data in MapView.tsx, but the
+        // three anchor hues live here so every consumer (map, leaderboard
+        // tier badges, score text) draws from one source.
         risk: {
-          100: '#cde2fb', 150: '#b7d3f6', 200: '#9ec5f4', 250: '#86b6ef',
-          300: '#6da7ec', 350: '#5598e7', 400: '#3987e5', 450: '#2a78d6',
-          500: '#256abf', 550: '#1c5cab', 600: '#184f95', 650: '#104281',
-          700: '#0d366b',
+          low: '#2E9E8F',   // deep teal
+          mid: '#E85D3D',   // orange-red
+          high: '#D93B3B',  // deep red — reserved for genuine outliers (~p99+)
         },
-        // Categorical slots 1 & 2 — rural vs. suburban/urban comparison.
-        series: {
-          suburban: { light: '#2a78d6', dark: '#3987e5' },
-          rural: { light: '#eb6834', dark: '#d95926' },
-        },
-        // Status (fixed, never themed) — data-density flag, priority tiers.
-        status: {
-          good: '#0ca30c',
-          warning: '#fab219',
-          serious: '#ec835a',
-          critical: '#d03b3b',
+        // The ONE accent outside the risk gradient. Interactive/selected
+        // states only — never used to encode risk severity.
+        accent: '#F2A73B',
+        // A third, distinct semantic: "mind the data quality," not
+        // severity and not interactivity. Deliberately a cool neutral so
+        // it never gets confused with risk-red or the accent.
+        caution: '#8A93A6',
+        // Rural vs. suburban/urban in the disparity chart is a categorical
+        // comparison, not a risk-magnitude one — reusing the risk gradient
+        // there would visually claim "rural = dangerous," which the real
+        // finding does NOT support (rural measures LOWER, likely a
+        // reporting-density artifact). Two muted, desaturated neutrals,
+        // deliberately outside both the risk gradient and the accent.
+        cohort: {
+          suburban: '#5B8AA6',
+          rural: '#A6825B',
         },
       },
       fontFamily: {
-        sans: ['system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'],
+      },
+      backdropBlur: {
+        panel: '16px',
+      },
+      keyframes: {
+        'slide-in-right': {
+          from: { transform: 'translateX(24px)', opacity: '0' },
+          to: { transform: 'translateX(0)', opacity: '1' },
+        },
+        'fade-out-strike': {
+          from: { opacity: '1' },
+          to: { opacity: '0.35' },
+        },
+        'value-in': {
+          from: { opacity: '0', transform: 'translateY(4px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'slide-in-right': 'slide-in-right 320ms cubic-bezier(0.16, 1, 0.3, 1)',
+        'fade-out-strike': 'fade-out-strike 200ms ease-out forwards',
+        'value-in': 'value-in 260ms cubic-bezier(0.16, 1, 0.3, 1) forwards',
       },
     },
   },

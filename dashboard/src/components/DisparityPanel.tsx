@@ -14,18 +14,17 @@ interface Props {
   data: DisparityPayload | null;
 }
 
-// Categorical slots 1 (blue) & 2 (orange) from the validated palette —
-// identity encoding (rural vs. suburban/urban), never re-cycled per county.
-const COLOR_SUBURBAN = '#2a78d6';
-const COLOR_RURAL = '#eb6834';
+// Rural vs. suburban/urban is a CATEGORICAL comparison, not a risk-magnitude
+// one — reusing the risk gradient's teal/red here would visually claim
+// "rural = dangerous," which the real finding does not support (rural
+// measures LOWER, plausibly a reporting-density artifact, not a safety
+// one). Two muted neutrals, outside the risk gradient and the accent.
+const COLOR_SUBURBAN = '#5B8AA6';
+const COLOR_RURAL = '#A6825B';
 
 export default function DisparityPanel({ data }: Props) {
   if (!data) {
-    return (
-      <div className="p-4 text-sm text-ink-secondary-light dark:text-ink-secondary-dark">
-        Loading disparity summary…
-      </div>
-    );
+    return <div className="p-4 text-sm text-ink-secondary">Loading disparity summary…</div>;
   }
 
   const byCounty = new Map<string, { county: string; rural?: number; suburban?: number }>();
@@ -41,11 +40,6 @@ export default function DisparityPanel({ data }: Props) {
 
   const gap = data.gap;
   const ratio = gap.rural_vs_suburban_exposure_ratio;
-  // Direction-agnostic phrasing on purpose: the real NC-08 numbers came out
-  // with rural Risk-Exposure LOWER than suburban/urban, not higher —
-  // plausibly reflecting sparser crash/incident reporting in rural counties
-  // rather than genuinely lower risk (see README Limitations). Don't
-  // hardcode an assumed direction; state whichever way the real ratio goes.
   const ratioText = Number.isFinite(ratio)
     ? ratio >= 1
       ? `${ratio.toFixed(2)}× higher than`
@@ -54,43 +48,51 @@ export default function DisparityPanel({ data }: Props) {
 
   return (
     <div className="p-4 space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold">Rural vs. suburban disparity</h2>
-        <p className="text-xs text-ink-secondary-light dark:text-ink-secondary-dark">
-          Mean Risk-Exposure by county, split rural / suburban-urban (NC-08).
-        </p>
-      </div>
-
-      <div className="rounded-md border border-grid-light dark:border-grid-dark p-3 text-xs">
+      <div className="rounded-lg border border-asphalt-line px-3 py-2.5 text-xs text-ink-secondary leading-relaxed">
         {ratioText ? (
           <p>
             Rural NC-08 segments average{' '}
-            <span className="font-semibold tabular-nums">{ratioText}</span>{' '}
+            <span className="font-data font-semibold text-ink-primary">{ratioText}</span>{' '}
             suburban/urban segments' Risk-Exposure, with{' '}
-            <span className="font-semibold tabular-nums">
+            <span className="font-data font-semibold text-ink-primary">
               {Math.abs(gap.rural_vs_suburban_confidence_gap_pct).toFixed(0)} pp
             </span>{' '}
-            {gap.rural_vs_suburban_confidence_gap_pct >= 0 ? 'more' : 'fewer'} rural
-            segments flagged low-confidence. A LOWER rural score plausibly
-            reflects sparser crash/incident reporting in rural counties, not
-            necessarily lower real risk — see Limitations.
+            {gap.rural_vs_suburban_confidence_gap_pct >= 0 ? 'more' : 'fewer'} rural segments
+            flagged low-confidence. A lower rural score plausibly reflects
+            sparser crash/incident reporting, not necessarily lower real risk.
           </p>
         ) : (
           <p>Disparity ratio unavailable (insufficient data in one group).</p>
         )}
       </div>
 
-      <div style={{ width: '100%', height: 260 }}>
+      <div style={{ width: '100%', height: 240 }}>
         <ResponsiveContainer>
           <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--tw-grid, #e1e0d9)" vertical={false} />
-            <XAxis dataKey="county" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-            <YAxis tick={{ fontSize: 11 }} width={40} />
-            <Tooltip
-              formatter={(value: number) => value?.toFixed(3)}
-              contentStyle={{ fontSize: 12 }}
+            <CartesianGrid strokeDasharray="3 3" stroke="#2A2E37" vertical={false} />
+            <XAxis
+              dataKey="county"
+              tick={{ fontSize: 10, fill: '#9AA1AC' }}
+              interval={0}
+              angle={-20}
+              textAnchor="end"
+              height={48}
+              axisLine={{ stroke: '#2A2E37' }}
+              tickLine={false}
             />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <YAxis tick={{ fontSize: 10, fill: '#9AA1AC' }} width={38} axisLine={false} tickLine={false} />
+            <Tooltip
+              formatter={(value: number) => value?.toFixed(4)}
+              contentStyle={{
+                fontSize: 12,
+                background: '#1C1F26',
+                border: '1px solid #2A2E37',
+                borderRadius: 8,
+                color: '#F2F3F5',
+              }}
+              cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11, color: '#9AA1AC' }} />
             <Bar dataKey="suburban" name="Suburban / urban" fill={COLOR_SUBURBAN} radius={[3, 3, 0, 0]} />
             <Bar dataKey="rural" name="Rural" fill={COLOR_RURAL} radius={[3, 3, 0, 0]} />
           </BarChart>
